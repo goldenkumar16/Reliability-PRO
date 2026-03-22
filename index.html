@@ -18,33 +18,37 @@ import {
   Activity,
   Target,
   ShieldCheck,
-  FileText
+  FileText,
+  HelpCircle,
+  FileDown
 } from 'lucide-react';
 
-// --- Components ---
+// --- Reusable UI Components ---
 
 const Card = ({ children, className = "" }) => (
-  <div className={`bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden ${className}`}>
+  <div className={`bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden transition-all hover:shadow-md ${className}`}>
     {children}
   </div>
 );
 
 const MetricCard = ({ title, value, unit, icon: Icon, colorClass, description }) => (
-  <Card className="p-5 flex flex-col justify-between hover:shadow-md transition-shadow">
+  <Card className="p-6 flex flex-col justify-between">
     <div className="flex justify-between items-start mb-4">
-      <div className={`p-2 rounded-lg ${colorClass} bg-opacity-10 text-opacity-100`}>
-        <Icon size={20} className={colorClass.replace('bg-', 'text-')} />
+      <div className={`p-3 rounded-xl ${colorClass} bg-opacity-10 text-opacity-100`}>
+        <Icon size={24} className={colorClass.replace('bg-', 'text-')} />
       </div>
       <div className="text-right">
-        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{title}</p>
-        <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
-          {value} <span className="text-sm font-normal text-slate-400">{unit}</span>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">{title}</p>
+        <h3 className="text-3xl font-black text-slate-900 dark:text-white mt-1">
+          {value} <span className="text-sm font-medium text-slate-400">{unit}</span>
         </h3>
       </div>
     </div>
-    <p className="text-xs text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700 pt-3 mt-2 italic">
-      {description}
-    </p>
+    <div className="pt-4 border-t border-slate-50 dark:border-slate-700">
+      <p className="text-xs text-slate-500 dark:text-slate-400 italic">
+        {description}
+      </p>
+    </div>
   </Card>
 );
 
@@ -66,7 +70,7 @@ const App = () => {
   const [history, setHistory] = useState([]);
   const [importStatus, setImportStatus] = useState(null);
 
-  // --- Logic ---
+  // --- Core Calculation Logic ---
 
   const metrics = useMemo(() => {
     const { 
@@ -79,17 +83,20 @@ const App = () => {
       idealCycleTime
     } = formData;
     
-    const mtbf = failuresCount > 0 ? (totalOperatingTime / failuresCount) : totalOperatingTime;
-    const mttr = failuresCount > 0 ? (totalDowntime / failuresCount) : 0;
-    const mttf = replacementsCount > 0 ? (totalOperatingTime / replacementsCount) : totalOperatingTime;
-    const mtbr = replacementsCount > 0 ? ((totalOperatingTime + totalDowntime) / replacementsCount) : (totalOperatingTime + totalDowntime);
+    // Safety guard against division by zero
+    const safeFailures = failuresCount > 0 ? failuresCount : 1;
+    const safeReplacements = replacementsCount > 0 ? replacementsCount : 1;
+    const safeTotalUnits = totalUnits > 0 ? totalUnits : 1;
+    const safeOperatingTime = totalOperatingTime > 0 ? totalOperatingTime : 1;
+
+    const mtbf = totalOperatingTime / safeFailures;
+    const mttr = totalDowntime / safeFailures;
+    const mttf = totalOperatingTime / safeReplacements;
+    const mtbr = (totalOperatingTime + totalDowntime) / safeReplacements;
 
     const availability = (totalOperatingTime / (totalOperatingTime + totalDowntime || 1)) * 100;
-    const performanceVal = totalOperatingTime > 0 
-      ? ((idealCycleTime * totalUnits) / totalOperatingTime) * 100 
-      : 0;
-    const performance = Math.min(performanceVal, 100); 
-    const quality = totalUnits > 0 ? (goodUnits / totalUnits) * 100 : 0;
+    const performance = Math.min(((idealCycleTime * totalUnits) / safeOperatingTime) * 100, 100); 
+    const quality = (goodUnits / safeTotalUnits) * 100;
     const oee = (availability / 100) * (performance / 100) * (quality / 100) * 100;
 
     return { mtbf, mttr, mttf, mtbr, availability, performance, quality, oee };
@@ -117,7 +124,17 @@ const App = () => {
     setHistory(history.filter(item => item.id !== id));
   };
 
-  // --- CSV Import/Export Logic ---
+  // --- CSV Handling Logic ---
+
+  const downloadCSVTemplate = () => {
+    const template = "Asset,Uptime,Downtime,Failures,TotalUnits,GoodUnits,IdealCycle\nLine A,2000,120,8,50000,48500,0.035";
+    const blob = new Blob([template], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Reliability_Import_Template.csv';
+    a.click();
+  };
 
   const handleImportCSV = (event) => {
     const file = event.target.files[0];
@@ -128,279 +145,253 @@ const App = () => {
       try {
         const text = e.target.result;
         const rows = text.split('\n').filter(row => row.trim() !== '');
-        if (rows.length < 2) throw new Error("File is empty or missing data row.");
+        if (rows.length < 2) throw new Error("Format Error");
 
         const headers = rows[0].split(',').map(h => h.trim().toLowerCase());
         const values = rows[1].split(',').map(v => v.trim());
 
         const dataMap = {};
-        headers.forEach((header, index) => {
-          dataMap[header] = values[index];
-        });
+        headers.forEach((header, index) => dataMap[header] = values[index]);
 
-        // Map CSV fields to State (handles varied naming conventions)
         setFormData({
           assetName: dataMap.asset || dataMap.assetname || dataMap.name || formData.assetName,
-          totalOperatingTime: parseFloat(dataMap.uptime || dataMap.operatingtime) || formData.totalOperatingTime,
-          totalDowntime: parseFloat(dataMap.downtime || dataMap.repairtime) || formData.totalDowntime,
-          failuresCount: parseInt(dataMap.failures || dataMap.breakdowns) || formData.failuresCount,
-          replacementsCount: parseInt(dataMap.replacements) || formData.replacementsCount,
-          totalUnits: parseInt(dataMap.totalunits || dataMap.output) || formData.totalUnits,
-          goodUnits: parseInt(dataMap.goodunits || dataMap.yield) || formData.goodUnits,
-          idealCycleTime: parseFloat(dataMap.idealcycle || dataMap.cycletime) || formData.idealCycleTime,
+          totalOperatingTime: parseFloat(dataMap.uptime || dataMap.operatingtime || dataMap.totaloperatingtime) || 0,
+          totalDowntime: parseFloat(dataMap.downtime || dataMap.repairtime || dataMap.totaldowntime) || 0,
+          failuresCount: parseInt(dataMap.failures || dataMap.breakdowns || dataMap.failurescount) || 0,
+          replacementsCount: parseInt(dataMap.replacements || dataMap.replacementscount) || 0,
+          totalUnits: parseInt(dataMap.totalunits || dataMap.output || dataMap.totaloutput) || 0,
+          goodUnits: parseInt(dataMap.goodunits || dataMap.yield || dataMap.goodoutput) || 0,
+          idealCycleTime: parseFloat(dataMap.idealcycle || dataMap.cycletime || dataMap.idealcycletime) || 0.001,
         });
 
-        setImportStatus({ type: 'success', message: 'Data imported successfully!' });
+        setImportStatus({ type: 'success', message: 'Import Successful!' });
         setTimeout(() => setImportStatus(null), 3000);
       } catch (err) {
-        setImportStatus({ type: 'error', message: 'Import failed. Check CSV format.' });
-        setTimeout(() => setImportStatus(null), 3000);
+        setImportStatus({ type: 'error', message: 'Failed to parse CSV. Use the template.' });
+        setTimeout(() => setImportStatus(null), 4000);
       }
     };
     reader.readAsText(file);
-    event.target.value = null; // Reset input
+    event.target.value = null;
   };
 
-  const downloadCSV = (data, filename) => {
-    if (!data || data.length === 0) return;
-    const headers = Object.keys(data[0]).join(',');
-    const rows = data.map(obj => 
-      Object.values(obj).map(val => 
-        typeof val === 'string' ? `"${val}"` : val
-      ).join(',')
-    );
-    const csvContent = [headers, ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const exportHistoryToCSV = () => {
+    if (history.length === 0) return;
+    const headers = ["Asset", "Date", "OEE", "Availability", "Performance", "Quality", "MTBF", "MTTR"].join(",");
+    const rows = history.map(item => [
+      item.assetName,
+      item.date,
+      item.metrics.oee.toFixed(2) + "%",
+      item.metrics.availability.toFixed(2) + "%",
+      item.metrics.performance.toFixed(2) + "%",
+      item.metrics.quality.toFixed(2) + "%",
+      item.metrics.mtbf.toFixed(2),
+      item.metrics.mttr.toFixed(2)
+    ].join(","));
+    
+    const csvContent = [headers, ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `${filename}.csv`);
-    link.click();
-  };
-
-  const exportHistory = () => {
-    const exportData = history.map(item => ({
-      Asset: item.assetName,
-      Date: item.date,
-      OEE: item.metrics.oee.toFixed(2),
-      MTBF: item.metrics.mtbf.toFixed(2),
-      MTTR: item.metrics.mttr.toFixed(2),
-      Availability: item.metrics.availability.toFixed(2),
-      Performance: item.metrics.performance.toFixed(2),
-      Quality: item.metrics.quality.toFixed(2)
-    }));
-    downloadCSV(exportData, `Maintenance_Logs_${new Date().toISOString().split('T')[0]}`);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Reliability_History_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans">
-      {/* Hidden File Input */}
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleImportCSV} 
-        className="hidden" 
-        accept=".csv"
-      />
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans antialiased">
+      <input type="file" ref={fileInputRef} onChange={handleImportCSV} className="hidden" accept=".csv" />
 
-      <nav className="sticky top-0 z-50 bg-white/80 dark:bg-slate-800/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16 items-center">
-            <div className="flex items-center gap-2">
-              <div className="bg-blue-600 p-1.5 rounded-lg">
-                <Settings className="text-white" size={24} />
-              </div>
-              <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">
-                ReliabilityPro + OEE
+      {/* Modern Navbar */}
+      <nav className="sticky top-0 z-50 bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border-b border-slate-200 dark:border-slate-700">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-2 rounded-xl shadow-lg shadow-blue-500/20">
+              <Activity className="text-white" size={24} />
+            </div>
+            <div>
+              <h1 className="text-xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">
+                ReliabilityPro
               </h1>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Intelligence Suite</p>
             </div>
-            
-            <div className="hidden md:flex space-x-4">
-              <button 
-                onClick={() => setActiveTab('calculator')}
-                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'calculator' ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'}`}
-              >
-                Calculator
-              </button>
-              <button 
-                onClick={() => setActiveTab('history')}
-                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'history' ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'}`}
-              >
-                History
-              </button>
-            </div>
+          </div>
+          
+          <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+            <button 
+              onClick={() => setActiveTab('calculator')}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'calculator' ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-900'}`}
+            >
+              Calculator
+            </button>
+            <button 
+              onClick={() => setActiveTab('history')}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'history' ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-900'}`}
+            >
+              History ({history.length})
+            </button>
           </div>
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 py-8">
         {activeTab === 'calculator' ? (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             
-            {/* Input Section */}
+            {/* Left Column: Input Form */}
             <div className="lg:col-span-4 space-y-6">
               <Card className="p-6">
                 <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold flex items-center gap-2">
                     <Calculator size={20} className="text-blue-600" />
-                    <h2 className="text-lg font-semibold">Input Data</h2>
+                    Data Entry
+                  </h2>
+                  <div className="flex gap-1">
+                    <button onClick={downloadCSVTemplate} title="Download Excel Template" className="p-2 text-slate-400 hover:text-blue-600 transition-colors">
+                      <FileDown size={18} />
+                    </button>
+                    <button onClick={() => fileInputRef.current.click()} title="Import Data" className="p-2 text-slate-400 hover:text-blue-600 transition-colors">
+                      <Upload size={18} />
+                    </button>
                   </div>
-                  <button 
-                    onClick={() => fileInputRef.current.click()}
-                    className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-lg transition-all"
-                    title="Import CSV"
-                  >
-                    <Upload size={18} />
-                  </button>
                 </div>
 
                 {importStatus && (
-                  <div className={`mb-4 p-2 rounded text-xs text-center ${importStatus.type === 'success' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                  <div className={`mb-6 p-3 rounded-xl text-xs font-bold text-center animate-bounce ${importStatus.type === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
                     {importStatus.message}
                   </div>
                 )}
                 
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Asset Name</label>
-                    <input type="text" name="assetName" value={formData.assetName} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all"/>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Asset Name</label>
+                    <input type="text" name="assetName" value={formData.assetName} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"/>
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Uptime (Hrs)</label>
-                      <input type="number" name="totalOperatingTime" value={formData.totalOperatingTime} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Uptime (Hrs)</label>
+                      <input type="number" name="totalOperatingTime" value={formData.totalOperatingTime} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Downtime (Hrs)</label>
-                      <input type="number" name="totalDowntime" value={formData.totalDowntime} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Failures</label>
-                      <input type="number" name="failuresCount" value={formData.failuresCount} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Total Output</label>
-                      <input type="number" name="totalUnits" value={formData.totalUnits} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Downtime (Hrs)</label>
+                      <input type="number" name="totalDowntime" value={formData.totalDowntime} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Good Units</label>
-                      <input type="number" name="goodUnits" value={formData.goodUnits} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Failures</label>
+                      <input type="number" name="failuresCount" value={formData.failuresCount} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Cycle (Hrs/U)</label>
-                      <input type="number" step="0.001" name="idealCycleTime" value={formData.idealCycleTime} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Output</label>
+                      <input type="number" name="totalUnits" value={formData.totalUnits} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Good Units</label>
+                      <input type="number" name="goodUnits" value={formData.goodUnits} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Ideal Cycle</label>
+                      <input type="number" step="0.001" name="idealCycleTime" value={formData.idealCycleTime} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
                     </div>
                   </div>
 
-                  <div className="pt-4 flex flex-col gap-2">
-                    <button onClick={saveToHistory} className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-lg shadow-blue-500/20 active:scale-95 transition-all">
-                      <Plus size={18} /> Save Entry
-                    </button>
-                    <div className="grid grid-cols-2 gap-2">
-                       <button 
-                        onClick={() => fileInputRef.current.click()}
-                        className="flex items-center justify-center gap-2 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-xs font-bold transition-all"
-                       >
-                         <Upload size={14} /> Import CSV
-                       </button>
-                       <button 
-                        onClick={exportHistory}
-                        className="flex items-center justify-center gap-2 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-xs font-bold transition-all"
-                       >
-                         <Download size={14} /> Export CSV
-                       </button>
+                  <button onClick={saveToHistory} className="w-full mt-4 flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-blue-500/25 transition-all active:scale-95">
+                    <Plus size={18} /> Log Analysis
+                  </button>
+                </div>
+              </Card>
+
+              {/* OEE Highlight Card */}
+              <Card className="p-6 bg-slate-900 text-white border-none shadow-2xl relative overflow-hidden group">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/20 blur-3xl -mr-10 -mt-10 group-hover:bg-blue-600/40 transition-all"></div>
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400">System Efficiency</p>
+                    <Target size={20} className="text-blue-500" />
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-5xl font-black">{metrics.oee.toFixed(1)}</span>
+                    <span className="text-xl font-bold text-slate-500">% OEE</span>
+                  </div>
+                  <div className="mt-6 space-y-1">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-400">
+                      <span>PERFORMANCE PROGRESS</span>
+                      <span>{metrics.oee.toFixed(0)}%</span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all duration-1000" style={{ width: `${metrics.oee}%` }}></div>
                     </div>
                   </div>
-                </div>
-              </Card>
-
-              {/* CSV Template Guide */}
-              <Card className="p-4 bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800">
-                <div className="flex gap-2 mb-2">
-                  <FileText className="text-blue-600" size={16} />
-                  <h4 className="text-xs font-bold text-blue-800 dark:text-blue-300">CSV Import Tip</h4>
-                </div>
-                <p className="text-[10px] text-blue-700/80 dark:text-blue-400/80 mb-2">
-                  Excel Headers: <code className="bg-white/50 px-1 rounded">Asset, Uptime, Downtime, Failures, TotalUnits, GoodUnits, IdealCycle</code>
-                </p>
-              </Card>
-
-              {/* OEE Summary Card */}
-              <Card className="p-6 bg-gradient-to-br from-blue-600 to-indigo-800 text-white border-none shadow-xl">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold flex items-center gap-2">
-                    <Target size={20} />
-                    OEE SCORE
-                  </h3>
-                  <span className="text-3xl font-black">{metrics.oee.toFixed(1)}%</span>
-                </div>
-                <div className="w-full bg-white/20 rounded-full h-3 overflow-hidden">
-                  <div className="bg-white h-full transition-all duration-1000" style={{ width: `${metrics.oee}%` }}></div>
                 </div>
               </Card>
             </div>
 
-            {/* Metrics Dashboard */}
+            {/* Right Column: Dashboard */}
             <div className="lg:col-span-8 space-y-8">
-              {/* OEE Breakdown */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card className="p-4 border-l-4 border-l-blue-500">
-                   <div className="flex items-center gap-2 text-blue-600 mb-2">
-                     <Clock size={16}/> <span className="text-xs font-bold uppercase tracking-wider">Availability</span>
-                   </div>
-                   <div className="text-xl font-bold">{metrics.availability.toFixed(1)}%</div>
-                </Card>
-                <Card className="p-4 border-l-4 border-l-amber-500">
-                   <div className="flex items-center gap-2 text-amber-600 mb-2">
-                     <Activity size={16}/> <span className="text-xs font-bold uppercase tracking-wider">Performance</span>
-                   </div>
-                   <div className="text-xl font-bold">{metrics.performance.toFixed(1)}%</div>
-                </Card>
-                <Card className="p-4 border-l-4 border-l-emerald-500">
-                   <div className="flex items-center gap-2 text-emerald-600 mb-2">
-                     <ShieldCheck size={16}/> <span className="text-xs font-bold uppercase tracking-wider">Quality</span>
-                   </div>
-                   <div className="text-xl font-bold">{metrics.quality.toFixed(1)}%</div>
-                </Card>
+              {/* OEE Pillars */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {[
+                  { label: 'Availability', val: metrics.availability, icon: Clock, color: 'text-blue-500', bg: 'bg-blue-500/5' },
+                  { label: 'Performance', val: metrics.performance, icon: Activity, color: 'text-amber-500', bg: 'bg-amber-500/5' },
+                  { label: 'Quality', val: metrics.quality, icon: ShieldCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/5' }
+                ].map((item) => (
+                  <Card key={item.label} className={`p-4 border-l-4 ${item.color.replace('text-', 'border-')}`}>
+                    <div className={`w-8 h-8 ${item.bg} ${item.color} rounded-lg flex items-center justify-center mb-3`}>
+                      <item.icon size={16} />
+                    </div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.label}</p>
+                    <h4 className="text-2xl font-black mt-1">{item.val.toFixed(1)}%</h4>
+                  </Card>
+                ))}
               </div>
 
-              {/* Reliability Grid */}
+              {/* Reliability Metrics */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <MetricCard 
                   title="MTBF" value={metrics.mtbf.toFixed(1)} unit="hrs" icon={TrendingUp} colorClass="bg-emerald-500"
-                  description="Mean Time Between Failures."
+                  description="Mean Time Between Failures. Target: Highest possible."
                 />
                 <MetricCard 
                   title="MTTR" value={metrics.mttr.toFixed(1)} unit="hrs" icon={Clock} colorClass="bg-orange-500"
-                  description="Mean Time To Repair."
+                  description="Mean Time To Repair. Target: Lowest possible."
                 />
               </div>
 
-              {/* Chart */}
-              <Card className="p-6">
-                <h2 className="text-lg font-semibold mb-8">Performance Distribution</h2>
-                <div className="space-y-6">
+              {/* Visualization Chart */}
+              <Card className="p-8">
+                <div className="flex items-center justify-between mb-10">
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <BarChart3 size={20} className="text-blue-600" />
+                    Comparative Analysis
+                  </h3>
+                  <div className="flex gap-4">
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-blue-600"></div><span className="text-[10px] font-bold text-slate-400">OEE</span></div>
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500"></div><span className="text-[10px] font-bold text-slate-400">MTBF</span></div>
+                  </div>
+                </div>
+                
+                <div className="space-y-8">
                   {[
-                    { label: 'OEE', val: metrics.oee, color: 'bg-indigo-600', max: 100 },
-                    { label: 'MTBF', val: metrics.mtbf, color: 'bg-emerald-500', max: Math.max(metrics.mtbf, 1000) },
-                    { label: 'MTTR', val: metrics.mttr, color: 'bg-orange-500', max: Math.max(metrics.mtbf, 1000) }
+                    { label: 'OEE Score', val: metrics.oee, color: 'bg-blue-600', max: 100, unit: '%' },
+                    { label: 'Availability', val: metrics.availability, color: 'bg-blue-400', max: 100, unit: '%' },
+                    { label: 'MTBF Rate', val: metrics.mtbf, color: 'bg-emerald-500', max: Math.max(metrics.mtbf, 500), unit: 'h' },
+                    { label: 'MTTR Speed', val: metrics.mttr, color: 'bg-orange-500', max: Math.max(metrics.mtbf, 500), unit: 'h' }
                   ].map((item) => {
                     const width = (item.val / item.max) * 100;
                     return (
-                      <div key={item.label}>
-                        <div className="flex justify-between text-xs font-bold mb-1">
-                          <span>{item.label}</span>
-                          <span>{item.val.toFixed(1)}</span>
+                      <div key={item.label} className="group">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-xs font-bold text-slate-600 group-hover:text-slate-900 transition-colors">{item.label}</span>
+                          <span className="text-[10px] font-mono bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded font-black">{item.val.toFixed(1)}{item.unit}</span>
                         </div>
-                        <div className="h-2 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                          <div className={`h-full ${item.color} transition-all duration-700`} style={{ width: `${width}%` }}></div>
+                        <div className="h-3 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden shadow-inner">
+                          <div className={`h-full ${item.color} rounded-full transition-all duration-1000 ease-out`} style={{ width: `${width}%` }}></div>
                         </div>
                       </div>
                     );
@@ -411,53 +402,68 @@ const App = () => {
           </div>
         ) : (
           /* History View */
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="flex items-center gap-2">
+          <div className="space-y-6 animate-in fade-in duration-500">
+            <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-3">
                 <History className="text-blue-600" />
-                <h2 className="text-xl font-bold">Maintenance Logs</h2>
+                <h2 className="text-xl font-black">Historical Logs</h2>
               </div>
               <div className="flex gap-3">
                 {history.length > 0 && (
-                  <button onClick={exportHistory} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold flex items-center gap-2 shadow-md">
-                    <Download size={16} /> Export All
+                  <button onClick={exportHistoryToCSV} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-500/20 transition-all active:scale-95">
+                    <FileSpreadsheet size={16} /> Export to Excel
                   </button>
                 )}
-                <button onClick={() => setHistory([])} className="px-4 py-2 text-sm text-red-500 hover:text-red-700 font-medium flex items-center gap-1">
-                  <Trash2 size={16} /> Clear
+                <button onClick={() => setHistory([])} className="px-4 py-2 text-xs text-red-500 hover:bg-red-50 rounded-xl font-bold flex items-center gap-1 transition-all">
+                  <Trash2 size={16} /> Clear Logs
                 </button>
               </div>
             </div>
 
             {history.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-slate-400 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
-                <History size={48} className="mb-4 opacity-20" />
-                <p>Log is empty. Start by saving a calculation.</p>
+              <div className="flex flex-col items-center justify-center py-32 text-slate-400 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-3xl">
+                <History size={64} className="mb-4 opacity-10" />
+                <p className="font-bold">Database is currently empty</p>
+                <p className="text-xs mt-1">Calculations will appear here once saved.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-separate border-spacing-y-2">
+                <table className="w-full text-left border-separate border-spacing-y-3">
                   <thead>
-                    <tr className="text-slate-400 text-[10px] font-black uppercase">
-                      <th className="px-4">Asset</th>
-                      <th className="px-4">Date</th>
-                      <th className="px-4">OEE</th>
-                      <th className="px-4">MTBF</th>
-                      <th className="px-4">MTTR</th>
-                      <th className="px-4 text-right">Delete</th>
+                    <tr className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] px-4">
+                      <th className="px-6 pb-2">Asset Intelligence</th>
+                      <th className="px-6 pb-2">OEE</th>
+                      <th className="px-6 pb-2">MTBF / MTTR</th>
+                      <th className="px-6 pb-2">A / P / Q</th>
+                      <th className="px-6 pb-2 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {history.map((item) => (
-                      <tr key={item.id} className="bg-white dark:bg-slate-800 shadow-sm">
-                        <td className="px-4 py-4 rounded-l-xl font-bold">{item.assetName}</td>
-                        <td className="px-4 py-4 text-slate-500 text-xs">{item.date}</td>
-                        <td className="px-4 py-4 font-bold text-indigo-600">{item.metrics.oee.toFixed(1)}%</td>
-                        <td className="px-4 py-4 text-emerald-600 font-mono text-xs">{item.metrics.mtbf.toFixed(1)}h</td>
-                        <td className="px-4 py-4 text-orange-600 font-mono text-xs">{item.metrics.mttr.toFixed(1)}h</td>
-                        <td className="px-4 py-4 rounded-r-xl text-right">
-                          <button onClick={() => deleteHistoryItem(item.id)} className="p-1 text-slate-300 hover:text-red-500 transition-colors">
-                            <Trash2 size={16} />
+                      <tr key={item.id} className="bg-white dark:bg-slate-800 shadow-sm hover:shadow-md transition-all group">
+                        <td className="px-6 py-5 rounded-l-2xl">
+                          <div className="font-bold text-slate-900 dark:text-white">{item.assetName}</div>
+                          <div className="text-[10px] text-slate-500 font-bold">{item.date}</div>
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="text-xl font-black text-indigo-600">{item.metrics.oee.toFixed(1)}%</div>
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="flex flex-col text-[11px] font-bold">
+                            <span className="text-emerald-600">↑ {item.metrics.mtbf.toFixed(1)}h MTBF</span>
+                            <span className="text-orange-500">↓ {item.metrics.mttr.toFixed(1)}h MTTR</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="flex gap-2">
+                             <div className="px-2 py-0.5 rounded bg-blue-50 text-blue-600 text-[9px] font-black">A: {item.metrics.availability.toFixed(0)}%</div>
+                             <div className="px-2 py-0.5 rounded bg-amber-50 text-amber-600 text-[9px] font-black">P: {item.metrics.performance.toFixed(0)}%</div>
+                             <div className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-600 text-[9px] font-black">Q: {item.metrics.quality.toFixed(0)}%</div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-5 rounded-r-2xl text-right">
+                          <button onClick={() => deleteHistoryItem(item.id)} className="p-2 text-slate-200 hover:text-red-500 transition-colors">
+                            <Trash2 size={18} />
                           </button>
                         </td>
                       </tr>
@@ -471,8 +477,14 @@ const App = () => {
       </main>
       
       <footer className="mt-20 border-t border-slate-200 dark:border-slate-800 py-10">
-        <div className="max-w-7xl mx-auto px-4 text-center text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-          <p>ReliabilityPro 3.0 • Manual & CSV Integration</p>
+        <div className="max-w-7xl mx-auto px-4 text-center">
+           <div className="flex justify-center gap-2 items-center mb-4">
+             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">System Operational</span>
+           </div>
+           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-relaxed">
+             ReliabilityPro Intelligence v3.5 • Optimized for Global Maintenance Standards
+           </p>
         </div>
       </footer>
     </div>
