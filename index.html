@@ -1,494 +1,623 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  Calculator, 
-  Settings, 
-  History, 
-  BarChart3, 
-  Info, 
-  Plus, 
-  Trash2, 
-  TrendingUp, 
-  Clock, 
-  AlertTriangle, 
-  RefreshCcw,
-  CheckCircle2,
-  FileSpreadsheet,
-  Download,
-  Upload,
-  Activity,
-  Target,
-  ShieldCheck,
-  FileText,
-  HelpCircle,
-  FileDown
-} from 'lucide-react';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ReliabilityPro + OEE Intelligence</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .tab-active { background-color: white; color: #2563eb; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1); }
+        [x-cloak] { display: none !important; }
+        
+        .ai-glow {
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
 
-// --- Reusable UI Components ---
+        .loading-shimmer {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
 
-const Card = ({ children, className = "" }) => (
-  <div className={`bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden transition-all hover:shadow-md ${className}`}>
-    {children}
-  </div>
-);
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
 
-const MetricCard = ({ title, value, unit, icon: Icon, colorClass, description }) => (
-  <Card className="p-6 flex flex-col justify-between">
-    <div className="flex justify-between items-start mb-4">
-      <div className={`p-3 rounded-xl ${colorClass} bg-opacity-10 text-opacity-100`}>
-        <Icon size={24} className={colorClass.replace('bg-', 'text-')} />
-      </div>
-      <div className="text-right">
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">{title}</p>
-        <h3 className="text-3xl font-black text-slate-900 dark:text-white mt-1">
-          {value} <span className="text-sm font-medium text-slate-400">{unit}</span>
-        </h3>
-      </div>
-    </div>
-    <div className="pt-4 border-t border-slate-50 dark:border-slate-700">
-      <p className="text-xs text-slate-500 dark:text-slate-400 italic">
-        {description}
-      </p>
-    </div>
-  </Card>
-);
-
-const App = () => {
-  const [activeTab, setActiveTab] = useState('calculator');
-  const fileInputRef = useRef(null);
-  
-  const [formData, setFormData] = useState({
-    assetName: 'Production Line Alpha',
-    totalOperatingTime: 2000, 
-    totalDowntime: 120,       
-    failuresCount: 8,
-    replacementsCount: 3,
-    totalUnits: 50000,        
-    goodUnits: 48500,         
-    idealCycleTime: 0.035     
-  });
-
-  const [history, setHistory] = useState([]);
-  const [importStatus, setImportStatus] = useState(null);
-
-  // --- Core Calculation Logic ---
-
-  const metrics = useMemo(() => {
-    const { 
-      totalOperatingTime, 
-      totalDowntime, 
-      failuresCount, 
-      replacementsCount,
-      totalUnits,
-      goodUnits,
-      idealCycleTime
-    } = formData;
-    
-    // Safety guard against division by zero
-    const safeFailures = failuresCount > 0 ? failuresCount : 1;
-    const safeReplacements = replacementsCount > 0 ? replacementsCount : 1;
-    const safeTotalUnits = totalUnits > 0 ? totalUnits : 1;
-    const safeOperatingTime = totalOperatingTime > 0 ? totalOperatingTime : 1;
-
-    const mtbf = totalOperatingTime / safeFailures;
-    const mttr = totalDowntime / safeFailures;
-    const mttf = totalOperatingTime / safeReplacements;
-    const mtbr = (totalOperatingTime + totalDowntime) / safeReplacements;
-
-    const availability = (totalOperatingTime / (totalOperatingTime + totalDowntime || 1)) * 100;
-    const performance = Math.min(((idealCycleTime * totalUnits) / safeOperatingTime) * 100, 100); 
-    const quality = (goodUnits / safeTotalUnits) * 100;
-    const oee = (availability / 100) * (performance / 100) * (quality / 100) * 100;
-
-    return { mtbf, mttr, mttf, mtbr, availability, performance, quality, oee };
-  }, [formData]);
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: name === 'assetName' ? value : parseFloat(value) || 0
-    }));
-  };
-
-  const saveToHistory = () => {
-    const newEntry = {
-      id: Date.now(),
-      date: new Date().toLocaleDateString(),
-      ...formData,
-      metrics: { ...metrics }
-    };
-    setHistory([newEntry, ...history]);
-  };
-
-  const deleteHistoryItem = (id) => {
-    setHistory(history.filter(item => item.id !== id));
-  };
-
-  // --- CSV Handling Logic ---
-
-  const downloadCSVTemplate = () => {
-    const template = "Asset,Uptime,Downtime,Failures,TotalUnits,GoodUnits,IdealCycle\nLine A,2000,120,8,50000,48500,0.035";
-    const blob = new Blob([template], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'Reliability_Import_Template.csv';
-    a.click();
-  };
-
-  const handleImportCSV = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target.result;
-        const rows = text.split('\n').filter(row => row.trim() !== '');
-        if (rows.length < 2) throw new Error("Format Error");
-
-        const headers = rows[0].split(',').map(h => h.trim().toLowerCase());
-        const values = rows[1].split(',').map(v => v.trim());
-
-        const dataMap = {};
-        headers.forEach((header, index) => dataMap[header] = values[index]);
-
-        setFormData({
-          assetName: dataMap.asset || dataMap.assetname || dataMap.name || formData.assetName,
-          totalOperatingTime: parseFloat(dataMap.uptime || dataMap.operatingtime || dataMap.totaloperatingtime) || 0,
-          totalDowntime: parseFloat(dataMap.downtime || dataMap.repairtime || dataMap.totaldowntime) || 0,
-          failuresCount: parseInt(dataMap.failures || dataMap.breakdowns || dataMap.failurescount) || 0,
-          replacementsCount: parseInt(dataMap.replacements || dataMap.replacementscount) || 0,
-          totalUnits: parseInt(dataMap.totalunits || dataMap.output || dataMap.totaloutput) || 0,
-          goodUnits: parseInt(dataMap.goodunits || dataMap.yield || dataMap.goodoutput) || 0,
-          idealCycleTime: parseFloat(dataMap.idealcycle || dataMap.cycletime || dataMap.idealcycletime) || 0.001,
-        });
-
-        setImportStatus({ type: 'success', message: 'Import Successful!' });
-        setTimeout(() => setImportStatus(null), 3000);
-      } catch (err) {
-        setImportStatus({ type: 'error', message: 'Failed to parse CSV. Use the template.' });
-        setTimeout(() => setImportStatus(null), 4000);
-      }
-    };
-    reader.readAsText(file);
-    event.target.value = null;
-  };
-
-  const exportHistoryToCSV = () => {
-    if (history.length === 0) return;
-    const headers = ["Asset", "Date", "OEE", "Availability", "Performance", "Quality", "MTBF", "MTTR"].join(",");
-    const rows = history.map(item => [
-      item.assetName,
-      item.date,
-      item.metrics.oee.toFixed(2) + "%",
-      item.metrics.availability.toFixed(2) + "%",
-      item.metrics.performance.toFixed(2) + "%",
-      item.metrics.quality.toFixed(2) + "%",
-      item.metrics.mtbf.toFixed(2),
-      item.metrics.mttr.toFixed(2)
-    ].join(","));
-    
-    const csvContent = [headers, ...rows].join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Reliability_History_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans antialiased">
-      <input type="file" ref={fileInputRef} onChange={handleImportCSV} className="hidden" accept=".csv" />
-
-      {/* Modern Navbar */}
-      <nav className="sticky top-0 z-50 bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border-b border-slate-200 dark:border-slate-700">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-2 rounded-xl shadow-lg shadow-blue-500/20">
-              <Activity className="text-white" size={24} />
+    <!-- Navigation -->
+    <nav class="sticky top-0 z-50 bg-white/70 backdrop-blur-xl border-b border-slate-200">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="bg-gradient-to-br from-blue-600 to-indigo-700 p-2 rounded-xl shadow-lg shadow-blue-500/20">
+                    <i data-lucide="activity" class="text-white w-6 h-6"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-black tracking-tight text-blue-600">ReliabilityPro</h1>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Intelligence Suite</p>
+                </div>
             </div>
-            <div>
-              <h1 className="text-xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">
-                ReliabilityPro
-              </h1>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Intelligence Suite</p>
-            </div>
-          </div>
-          
-          <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
-            <button 
-              onClick={() => setActiveTab('calculator')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'calculator' ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-900'}`}
-            >
-              Calculator
-            </button>
-            <button 
-              onClick={() => setActiveTab('history')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'history' ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-900'}`}
-            >
-              History ({history.length})
-            </button>
-          </div>
-        </div>
-      </nav>
-
-      <main className="max-w-7xl mx-auto px-4 py-8">
-        {activeTab === 'calculator' ? (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             
-            {/* Left Column: Input Form */}
-            <div className="lg:col-span-4 space-y-6">
-              <Card className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-lg font-bold flex items-center gap-2">
-                    <Calculator size={20} className="text-blue-600" />
-                    Data Entry
-                  </h2>
-                  <div className="flex gap-1">
-                    <button onClick={downloadCSVTemplate} title="Download Excel Template" className="p-2 text-slate-400 hover:text-blue-600 transition-colors">
-                      <FileDown size={18} />
-                    </button>
-                    <button onClick={() => fileInputRef.current.click()} title="Import Data" className="p-2 text-slate-400 hover:text-blue-600 transition-colors">
-                      <Upload size={18} />
-                    </button>
-                  </div>
-                </div>
-
-                {importStatus && (
-                  <div className={`mb-6 p-3 rounded-xl text-xs font-bold text-center animate-bounce ${importStatus.type === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
-                    {importStatus.message}
-                  </div>
-                )}
-                
-                <div className="space-y-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Asset Name</label>
-                    <input type="text" name="assetName" value={formData.assetName} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"/>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Uptime (Hrs)</label>
-                      <input type="number" name="totalOperatingTime" value={formData.totalOperatingTime} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Downtime (Hrs)</label>
-                      <input type="number" name="totalDowntime" value={formData.totalDowntime} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Failures</label>
-                      <input type="number" name="failuresCount" value={formData.failuresCount} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Output</label>
-                      <input type="number" name="totalUnits" value={formData.totalUnits} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Good Units</label>
-                      <input type="number" name="goodUnits" value={formData.goodUnits} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Ideal Cycle</label>
-                      <input type="number" step="0.001" name="idealCycleTime" value={formData.idealCycleTime} onChange={handleInputChange} className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"/>
-                    </div>
-                  </div>
-
-                  <button onClick={saveToHistory} className="w-full mt-4 flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-blue-500/25 transition-all active:scale-95">
-                    <Plus size={18} /> Log Analysis
-                  </button>
-                </div>
-              </Card>
-
-              {/* OEE Highlight Card */}
-              <Card className="p-6 bg-slate-900 text-white border-none shadow-2xl relative overflow-hidden group">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/20 blur-3xl -mr-10 -mt-10 group-hover:bg-blue-600/40 transition-all"></div>
-                <div className="relative z-10">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400">System Efficiency</p>
-                    <Target size={20} className="text-blue-500" />
-                  </div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-5xl font-black">{metrics.oee.toFixed(1)}</span>
-                    <span className="text-xl font-bold text-slate-500">% OEE</span>
-                  </div>
-                  <div className="mt-6 space-y-1">
-                    <div className="flex justify-between text-[10px] font-bold text-slate-400">
-                      <span>PERFORMANCE PROGRESS</span>
-                      <span>{metrics.oee.toFixed(0)}%</span>
-                    </div>
-                    <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all duration-1000" style={{ width: `${metrics.oee}%` }}></div>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            </div>
-
-            {/* Right Column: Dashboard */}
-            <div className="lg:col-span-8 space-y-8">
-              {/* OEE Pillars */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {[
-                  { label: 'Availability', val: metrics.availability, icon: Clock, color: 'text-blue-500', bg: 'bg-blue-500/5' },
-                  { label: 'Performance', val: metrics.performance, icon: Activity, color: 'text-amber-500', bg: 'bg-amber-500/5' },
-                  { label: 'Quality', val: metrics.quality, icon: ShieldCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/5' }
-                ].map((item) => (
-                  <Card key={item.label} className={`p-4 border-l-4 ${item.color.replace('text-', 'border-')}`}>
-                    <div className={`w-8 h-8 ${item.bg} ${item.color} rounded-lg flex items-center justify-center mb-3`}>
-                      <item.icon size={16} />
-                    </div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.label}</p>
-                    <h4 className="text-2xl font-black mt-1">{item.val.toFixed(1)}%</h4>
-                  </Card>
-                ))}
-              </div>
-
-              {/* Reliability Metrics */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <MetricCard 
-                  title="MTBF" value={metrics.mtbf.toFixed(1)} unit="hrs" icon={TrendingUp} colorClass="bg-emerald-500"
-                  description="Mean Time Between Failures. Target: Highest possible."
-                />
-                <MetricCard 
-                  title="MTTR" value={metrics.mttr.toFixed(1)} unit="hrs" icon={Clock} colorClass="bg-orange-500"
-                  description="Mean Time To Repair. Target: Lowest possible."
-                />
-              </div>
-
-              {/* Visualization Chart */}
-              <Card className="p-8">
-                <div className="flex items-center justify-between mb-10">
-                  <h3 className="text-lg font-bold flex items-center gap-2">
-                    <BarChart3 size={20} className="text-blue-600" />
-                    Comparative Analysis
-                  </h3>
-                  <div className="flex gap-4">
-                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-blue-600"></div><span className="text-[10px] font-bold text-slate-400">OEE</span></div>
-                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500"></div><span className="text-[10px] font-bold text-slate-400">MTBF</span></div>
-                  </div>
-                </div>
-                
-                <div className="space-y-8">
-                  {[
-                    { label: 'OEE Score', val: metrics.oee, color: 'bg-blue-600', max: 100, unit: '%' },
-                    { label: 'Availability', val: metrics.availability, color: 'bg-blue-400', max: 100, unit: '%' },
-                    { label: 'MTBF Rate', val: metrics.mtbf, color: 'bg-emerald-500', max: Math.max(metrics.mtbf, 500), unit: 'h' },
-                    { label: 'MTTR Speed', val: metrics.mttr, color: 'bg-orange-500', max: Math.max(metrics.mtbf, 500), unit: 'h' }
-                  ].map((item) => {
-                    const width = (item.val / item.max) * 100;
-                    return (
-                      <div key={item.label} className="group">
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-xs font-bold text-slate-600 group-hover:text-slate-900 transition-colors">{item.label}</span>
-                          <span className="text-[10px] font-mono bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded font-black">{item.val.toFixed(1)}{item.unit}</span>
-                        </div>
-                        <div className="h-3 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden shadow-inner">
-                          <div className={`h-full ${item.color} rounded-full transition-all duration-1000 ease-out`} style={{ width: `${width}%` }}></div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </Card>
-            </div>
-          </div>
-        ) : (
-          /* History View */
-          <div className="space-y-6 animate-in fade-in duration-500">
-            <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="flex items-center gap-3">
-                <History className="text-blue-600" />
-                <h2 className="text-xl font-black">Historical Logs</h2>
-              </div>
-              <div className="flex gap-3">
-                {history.length > 0 && (
-                  <button onClick={exportHistoryToCSV} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-500/20 transition-all active:scale-95">
-                    <FileSpreadsheet size={16} /> Export to Excel
-                  </button>
-                )}
-                <button onClick={() => setHistory([])} className="px-4 py-2 text-xs text-red-500 hover:bg-red-50 rounded-xl font-bold flex items-center gap-1 transition-all">
-                  <Trash2 size={16} /> Clear Logs
+            <div class="flex bg-slate-100 p-1 rounded-xl">
+                <button id="tab-calculator" onclick="switchTab('calculator')" class="px-4 py-1.5 rounded-lg text-xs font-bold transition-all tab-active">
+                    Calculator
                 </button>
-              </div>
+                <button id="tab-history" onclick="switchTab('history')" class="px-4 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-500 hover:text-slate-900">
+                    History (<span id="history-count">0</span>)
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        
+        <!-- Calculator Section -->
+        <div id="section-calculator" class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            
+            <!-- Left: Inputs -->
+            <div class="lg:col-span-4 space-y-6">
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-lg font-bold flex items-center gap-2">
+                            <i data-lucide="calculator" class="text-blue-600 w-5 h-5"></i>
+                            Data Entry
+                        </h2>
+                        <div class="flex gap-1">
+                            <button onclick="downloadCSVTemplate()" title="Download Excel Template" class="p-2 text-slate-400 hover:text-blue-600 transition-colors">
+                                <i data-lucide="file-down" class="w-4 h-4"></i>
+                            </button>
+                            <button onclick="document.getElementById('file-import').click()" title="Import Data" class="p-2 text-slate-400 hover:text-blue-600 transition-colors">
+                                <i data-lucide="upload" class="w-4 h-4"></i>
+                            </button>
+                            <input type="file" id="file-import" class="hidden" accept=".csv" onchange="handleImportCSV(event)">
+                        </div>
+                    </div>
+
+                    <div id="import-status" class="hidden mb-6 p-3 rounded-xl text-xs font-bold text-center"></div>
+                    
+                    <div class="space-y-4">
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Asset Name</label>
+                            <input type="text" id="assetName" value="Production Line Alpha" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium">
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Uptime (Hrs)</label>
+                                <input type="number" id="uptime" value="2000" oninput="updateCalculations()" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Downtime (Hrs)</label>
+                                <input type="number" id="downtime" value="120" oninput="updateCalculations()" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Failures</label>
+                                <input type="number" id="failures" value="8" oninput="updateCalculations()" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Output</label>
+                                <input type="number" id="totalUnits" value="50000" oninput="updateCalculations()" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Good Units</label>
+                                <input type="number" id="goodUnits" value="48500" oninput="updateCalculations()" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Ideal Cycle (Hrs)</label>
+                                <input type="number" id="idealCycle" value="0.035" step="0.001" oninput="updateCalculations()" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                            </div>
+                        </div>
+
+                        <button onclick="saveToHistory()" class="w-full mt-4 flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-blue-500/25 transition-all active:scale-95">
+                            <i data-lucide="plus" class="w-4 h-4"></i> Log Analysis
+                        </button>
+
+                        <div class="pt-2 flex flex-col gap-2">
+                            <button onclick="generateAIAnalysis()" class="w-full flex items-center justify-center gap-2 py-2.5 bg-white border border-blue-200 text-blue-600 rounded-xl font-bold hover:bg-blue-50 transition-all ai-glow">
+                                <span class="text-lg">✨</span> Analyze Performance
+                            </button>
+                            <button onclick="generateAIMaintenance()" class="w-full flex items-center justify-center gap-2 py-2.5 bg-white border border-indigo-200 text-indigo-600 rounded-xl font-bold hover:bg-indigo-50 transition-all ai-glow">
+                                <span class="text-lg">✨</span> Suggest Maintenance Plan
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900 text-white rounded-2xl p-6 shadow-2xl relative overflow-hidden group">
+                    <div class="relative z-10">
+                        <div class="flex items-center justify-between mb-2">
+                            <p class="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400">System Efficiency</p>
+                            <i data-lucide="target" class="text-blue-500 w-5 h-5"></i>
+                        </div>
+                        <div class="flex items-baseline gap-2">
+                            <span id="oee-val" class="text-5xl font-black">0.0</span>
+                            <span class="text-xl font-bold text-slate-500">% OEE</span>
+                        </div>
+                        <div class="mt-6 space-y-1">
+                            <div class="flex justify-between text-[10px] font-bold text-slate-400">
+                                <span>PERFORMANCE PROGRESS</span>
+                                <span id="oee-percent">0%</span>
+                            </div>
+                            <div class="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+                                <div id="oee-bar" class="h-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all duration-1000" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            {history.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-32 text-slate-400 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-3xl">
-                <History size={64} className="mb-4 opacity-10" />
-                <p className="font-bold">Database is currently empty</p>
-                <p className="text-xs mt-1">Calculations will appear here once saved.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-separate border-spacing-y-3">
-                  <thead>
-                    <tr className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] px-4">
-                      <th className="px-6 pb-2">Asset Intelligence</th>
-                      <th className="px-6 pb-2">OEE</th>
-                      <th className="px-6 pb-2">MTBF / MTTR</th>
-                      <th className="px-6 pb-2">A / P / Q</th>
-                      <th className="px-6 pb-2 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {history.map((item) => (
-                      <tr key={item.id} className="bg-white dark:bg-slate-800 shadow-sm hover:shadow-md transition-all group">
-                        <td className="px-6 py-5 rounded-l-2xl">
-                          <div className="font-bold text-slate-900 dark:text-white">{item.assetName}</div>
-                          <div className="text-[10px] text-slate-500 font-bold">{item.date}</div>
-                        </td>
-                        <td className="px-6 py-5">
-                          <div className="text-xl font-black text-indigo-600">{item.metrics.oee.toFixed(1)}%</div>
-                        </td>
-                        <td className="px-6 py-5">
-                          <div className="flex flex-col text-[11px] font-bold">
-                            <span className="text-emerald-600">↑ {item.metrics.mtbf.toFixed(1)}h MTBF</span>
-                            <span className="text-orange-500">↓ {item.metrics.mttr.toFixed(1)}h MTTR</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-5">
-                          <div className="flex gap-2">
-                             <div className="px-2 py-0.5 rounded bg-blue-50 text-blue-600 text-[9px] font-black">A: {item.metrics.availability.toFixed(0)}%</div>
-                             <div className="px-2 py-0.5 rounded bg-amber-50 text-amber-600 text-[9px] font-black">P: {item.metrics.performance.toFixed(0)}%</div>
-                             <div className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-600 text-[9px] font-black">Q: {item.metrics.quality.toFixed(0)}%</div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-5 rounded-r-2xl text-right">
-                          <button onClick={() => deleteHistoryItem(item.id)} className="p-2 text-slate-200 hover:text-red-500 transition-colors">
-                            <Trash2 size={18} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-      </main>
-      
-      <footer className="mt-20 border-t border-slate-200 dark:border-slate-800 py-10">
-        <div className="max-w-7xl mx-auto px-4 text-center">
-           <div className="flex justify-center gap-2 items-center mb-4">
-             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">System Operational</span>
-           </div>
-           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-relaxed">
-             ReliabilityPro Intelligence v3.5 • Optimized for Global Maintenance Standards
-           </p>
-        </div>
-      </footer>
-    </div>
-  );
-};
+            <!-- Right: Dashboard & AI Panel -->
+            <div class="lg:col-span-8 space-y-8">
+                <!-- AI Insights Panel (Hidden by default) -->
+                <div id="ai-response-panel" class="hidden bg-white rounded-2xl border-2 border-blue-100 p-6 shadow-lg animate-in slide-in-from-top-4 duration-500">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xl">✨</span>
+                            <h3 id="ai-title" class="text-lg font-black text-blue-900">AI Reliability Insights</h3>
+                        </div>
+                        <button onclick="closeAIPanel()" class="text-slate-400 hover:text-slate-600">
+                            <i data-lucide="x" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                    <div id="ai-content" class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                        <!-- AI Response content goes here -->
+                    </div>
+                    <div id="ai-loading" class="hidden space-y-3">
+                        <div class="h-4 w-3/4 loading-shimmer rounded"></div>
+                        <div class="h-4 w-full loading-shimmer rounded"></div>
+                        <div class="h-4 w-5/6 loading-shimmer rounded"></div>
+                    </div>
+                </div>
 
-export default App;
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-4 rounded-xl border border-slate-200 border-l-4 border-l-blue-500">
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Availability</p>
+                        <h4 id="avail-val" class="text-2xl font-black mt-1">0%</h4>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl border border-slate-200 border-l-4 border-l-amber-500">
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Performance</p>
+                        <h4 id="perf-val" class="text-2xl font-black mt-1">0%</h4>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl border border-slate-200 border-l-4 border-l-emerald-500">
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Quality</p>
+                        <h4 id="qual-val" class="text-2xl font-black mt-1">0%</h4>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col justify-between">
+                        <div class="flex justify-between items-start mb-4">
+                            <div class="p-3 rounded-xl bg-emerald-500 bg-opacity-10 text-emerald-500">
+                                <i data-lucide="trending-up" class="w-6 h-6"></i>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-xs font-bold uppercase tracking-wider text-slate-400">MTBF</p>
+                                <h3 id="mtbf-val" class="text-3xl font-black text-slate-900 mt-1">0.0 <span class="text-sm font-normal text-slate-400">hrs</span></h3>
+                            </div>
+                        </div>
+                        <p class="text-xs text-slate-500 italic pt-4 border-t border-slate-50">Mean Time Between Failures.</p>
+                    </div>
+                    <div class="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col justify-between">
+                        <div class="flex justify-between items-start mb-4">
+                            <div class="p-3 rounded-xl bg-orange-500 bg-opacity-10 text-orange-500">
+                                <i data-lucide="clock" class="w-6 h-6"></i>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-xs font-bold uppercase tracking-wider text-slate-400">MTTR</p>
+                                <h3 id="mttr-val" class="text-3xl font-black text-slate-900 mt-1">0.0 <span class="text-sm font-normal text-slate-400">hrs</span></h3>
+                            </div>
+                        </div>
+                        <p class="text-xs text-slate-500 italic pt-4 border-t border-slate-50">Mean Time To Repair.</p>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm">
+                    <div class="flex items-center justify-between mb-10">
+                        <h3 class="text-lg font-bold flex items-center gap-2">
+                            <i data-lucide="bar-chart-3" class="text-blue-600 w-5 h-5"></i>
+                            Comparative Analysis
+                        </h3>
+                    </div>
+                    <div class="space-y-8" id="chart-container">
+                        <!-- Chart bars will be injected here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Section -->
+        <div id="section-history" class="hidden space-y-6">
+            <div class="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex items-center gap-3">
+                    <i data-lucide="history" class="text-blue-600 w-6 h-6"></i>
+                    <h2 class="text-xl font-black">Historical Logs</h2>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="exportHistory()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg transition-all active:scale-95">
+                        <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Export to Excel
+                    </button>
+                    <button onclick="clearHistory()" class="px-4 py-2 text-xs text-red-500 hover:bg-red-50 rounded-xl font-bold flex items-center gap-1 transition-all">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i> Clear Logs
+                    </button>
+                </div>
+            </div>
+
+            <div id="history-empty" class="flex flex-col items-center justify-center py-32 text-slate-400 border-2 border-dashed border-slate-200 rounded-3xl">
+                <i data-lucide="history" class="w-16 h-16 mb-4 opacity-10"></i>
+                <p class="font-bold">Database is currently empty</p>
+                <p class="text-xs mt-1">Calculations will appear here once saved.</p>
+            </div>
+
+            <div id="history-table-container" class="hidden overflow-x-auto">
+                <table class="w-full text-left border-separate border-spacing-y-3">
+                    <thead>
+                        <tr class="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] px-4">
+                            <th class="px-6 pb-2">Asset Intelligence</th>
+                            <th class="px-6 pb-2">OEE</th>
+                            <th class="px-6 pb-2">MTBF / MTTR</th>
+                            <th class="px-6 pb-2 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <footer class="mt-20 border-t border-slate-200 py-10 text-center">
+        <div class="flex justify-center gap-2 items-center mb-4">
+            <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+            <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">System Operational</span>
+        </div>
+        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-relaxed px-4">
+            ReliabilityPro Intelligence v4.0 • Gemini LLM Powered
+        </p>
+    </footer>
+
+    <script>
+        // Gemini API Configuration
+        const apiKey = "";
+        const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025";
+        
+        async function callGemini(prompt, systemInstruction = "") {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined
+            };
+
+            const maxRetries = 5;
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    
+                    const result = await response.json();
+                    return result.candidates?.[0]?.content?.parts?.[0]?.text || "No analysis generated.";
+                } catch (error) {
+                    if (i === maxRetries - 1) throw error;
+                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+                }
+            }
+        }
+
+        // AI Functions
+        async function generateAIAnalysis() {
+            const panel = document.getElementById('ai-response-panel');
+            const content = document.getElementById('ai-content');
+            const loading = document.getElementById('ai-loading');
+            const title = document.getElementById('ai-title');
+
+            const asset = document.getElementById('assetName').value;
+            const mtbf = document.getElementById('mtbf-val').innerText;
+            const mttr = document.getElementById('mttr-val').innerText;
+            const oee = document.getElementById('oee-val').innerText;
+            const avail = document.getElementById('avail-val').innerText;
+            const perf = document.getElementById('perf-val').innerText;
+            const qual = document.getElementById('qual-val').innerText;
+
+            title.innerText = "✨ AI Reliability Insights";
+            content.innerText = "";
+            loading.classList.remove('hidden');
+            panel.classList.remove('hidden');
+            panel.scrollIntoView({ behavior: 'smooth' });
+
+            const systemPrompt = "You are a World-Class Reliability Engineer and Maintenance Expert. Analyze the provided metrics for a production asset. Provide a concise executive summary and specific improvement actions. Use engineering terminology.";
+            const userPrompt = `Asset: ${asset}\nMetrics:\nOEE: ${oee}%\nAvailability: ${avail}\nPerformance: ${perf}\nQuality: ${qual}\nMTBF: ${mtbf} hrs\nMTTR: ${mttr} hrs\n\nProvide a 3-sentence analysis of current health and 3 specific bullet points for improvement.`;
+
+            try {
+                const response = await callGemini(userPrompt, systemPrompt);
+                loading.classList.add('hidden');
+                content.innerText = response;
+            } catch (err) {
+                loading.classList.add('hidden');
+                content.innerText = "Error connecting to Gemini API. Please verify your connection and try again.";
+            }
+        }
+
+        async function generateAIMaintenance() {
+            const panel = document.getElementById('ai-response-panel');
+            const content = document.getElementById('ai-content');
+            const loading = document.getElementById('ai-loading');
+            const title = document.getElementById('ai-title');
+
+            const asset = document.getElementById('assetName').value;
+            const mtbf = document.getElementById('mtbf-val').innerText;
+
+            title.innerText = "✨ Smart Maintenance Planner";
+            content.innerText = "";
+            loading.classList.remove('hidden');
+            panel.classList.remove('hidden');
+            panel.scrollIntoView({ behavior: 'smooth' });
+
+            const systemPrompt = "You are a Maintenance Planner. Based on the asset type and its current MTBF, suggest a weekly preventive maintenance plan.";
+            const userPrompt = `Asset Name: ${asset}\nCurrent MTBF: ${mtbf} hours.\n\nGenerate a suggested weekly preventive maintenance checklist (5 items) to reduce failures and extend life. Format with bullet points.`;
+
+            try {
+                const response = await callGemini(userPrompt, systemPrompt);
+                loading.classList.add('hidden');
+                content.innerText = response;
+            } catch (err) {
+                loading.classList.add('hidden');
+                content.innerText = "Error connecting to Gemini API. Check your network or API key.";
+            }
+        }
+
+        function closeAIPanel() {
+            document.getElementById('ai-response-panel').classList.add('hidden');
+        }
+
+        // State
+        let history = JSON.parse(localStorage.getItem('reliabilityHistory') || '[]');
+        
+        // Tab Switching
+        function switchTab(tab) {
+            const sections = ['calculator', 'history'];
+            sections.forEach(s => {
+                document.getElementById(`section-${s}`).classList.toggle('hidden', s !== tab);
+                const btn = document.getElementById(`tab-${s}`);
+                if (s === tab) {
+                    btn.classList.add('tab-active');
+                    btn.classList.remove('text-slate-500');
+                } else {
+                    btn.classList.remove('tab-active');
+                    btn.classList.add('text-slate-500');
+                }
+            });
+            if (tab === 'history') renderHistory();
+        }
+
+        // Calculations
+        function updateCalculations() {
+            const assetName = document.getElementById('assetName').value;
+            const uptime = parseFloat(document.getElementById('uptime').value) || 0;
+            const downtime = parseFloat(document.getElementById('downtime').value) || 0;
+            const failures = parseFloat(document.getElementById('failures').value) || 0;
+            const totalUnits = parseFloat(document.getElementById('totalUnits').value) || 0;
+            const goodUnits = parseFloat(document.getElementById('goodUnits').value) || 0;
+            const idealCycle = parseFloat(document.getElementById('idealCycle').value) || 0;
+
+            const safeFailures = failures > 0 ? failures : 1;
+            const safeUptime = uptime > 0 ? uptime : 1;
+            const safeTotalUnits = totalUnits > 0 ? totalUnits : 1;
+
+            const availability = (uptime / (uptime + downtime || 1)) * 100;
+            const performance = Math.min(((idealCycle * totalUnits) / safeUptime) * 100, 100);
+            const quality = (goodUnits / safeTotalUnits) * 100;
+            const oee = (availability / 100) * (performance / 100) * (quality / 100) * 100;
+
+            const mtbf = uptime / safeFailures;
+            const mttr = downtime / safeFailures;
+
+            // Update UI
+            document.getElementById('oee-val').innerText = oee.toFixed(1);
+            document.getElementById('oee-percent').innerText = Math.round(oee) + '%';
+            document.getElementById('oee-bar').style.width = oee + '%';
+            
+            document.getElementById('avail-val').innerText = availability.toFixed(1) + '%';
+            document.getElementById('perf-val').innerText = performance.toFixed(1) + '%';
+            document.getElementById('qual-val').innerText = quality.toFixed(1) + '%';
+            
+            document.getElementById('mtbf-val').innerText = mtbf.toFixed(1);
+            document.getElementById('mttr-val').innerText = mttr.toFixed(1);
+
+            renderChart(oee, availability, mtbf, mttr);
+        }
+
+        function renderChart(oee, avail, mtbf, mttr) {
+            const container = document.getElementById('chart-container');
+            const data = [
+                { label: 'OEE Score', val: oee, max: 100, color: 'bg-blue-600', unit: '%' },
+                { label: 'Availability', val: avail, max: 100, color: 'bg-blue-400', unit: '%' },
+                { label: 'MTBF Rate', val: mtbf, max: Math.max(mtbf, 500), color: 'bg-emerald-500', unit: 'h' },
+                { label: 'MTTR Speed', val: mttr, max: Math.max(mtbf, 500), color: 'bg-orange-500', unit: 'h' }
+            ];
+
+            container.innerHTML = data.map(item => `
+                <div class="group">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-bold text-slate-600">${item.label}</span>
+                        <span class="text-[10px] font-mono bg-slate-100 px-2 py-0.5 rounded font-black">${item.val.toFixed(1)}${item.unit}</span>
+                    </div>
+                    <div class="h-3 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                        <div class="h-full ${item.color} rounded-full transition-all duration-1000" style="width: ${(item.val / item.max) * 100}%"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // CSV Utilities
+        function downloadCSVTemplate() {
+            const template = "Asset,Uptime,Downtime,Failures,TotalUnits,GoodUnits,IdealCycle\nLine A,2000,120,8,50000,48500,0.035";
+            const blob = new Blob([template], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'Reliability_Import_Template.csv';
+            a.click();
+        }
+
+        function handleImportCSV(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const rows = e.target.result.split('\n').filter(r => r.trim());
+                    const headers = rows[0].split(',').map(h => h.trim().toLowerCase());
+                    const values = rows[1].split(',').map(v => v.trim());
+                    const data = {};
+                    headers.forEach((h, i) => data[h] = values[i]);
+
+                    document.getElementById('assetName').value = data.asset || "Imported Line";
+                    document.getElementById('uptime').value = data.uptime || 0;
+                    document.getElementById('downtime').value = data.downtime || 0;
+                    document.getElementById('failures').value = data.failures || 0;
+                    document.getElementById('totalUnits').value = data.totalunits || 0;
+                    document.getElementById('goodUnits').value = data.goodunits || 0;
+                    document.getElementById('idealCycle').value = data.idealcycle || 0.001;
+                    
+                    updateCalculations();
+                    showStatus('Import Successful!', 'bg-emerald-50 text-emerald-600');
+                } catch (err) {
+                    showStatus('Import Failed. Check format.', 'bg-red-50 text-red-600');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function showStatus(msg, classes) {
+            const el = document.getElementById('import-status');
+            el.innerText = msg;
+            el.className = `mb-6 p-3 rounded-xl text-xs font-bold text-center ${classes}`;
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 3000);
+        }
+
+        // History Management
+        function saveToHistory() {
+            const assetName = document.getElementById('assetName').value;
+            const uptime = parseFloat(document.getElementById('uptime').value) || 0;
+            const downtime = parseFloat(document.getElementById('downtime').value) || 0;
+            const failures = parseFloat(document.getElementById('failures').value) || 0;
+            const totalUnits = parseFloat(document.getElementById('totalUnits').value) || 0;
+            const goodUnits = parseFloat(document.getElementById('goodUnits').value) || 0;
+            const idealCycle = parseFloat(document.getElementById('idealCycle').value) || 0;
+
+            const avail = (uptime / (uptime + downtime || 1)) * 100;
+            const perf = Math.min(((idealCycle * totalUnits) / (uptime || 1)) * 100, 100);
+            const qual = (goodUnits / (totalUnits || 1)) * 100;
+            const oee = (avail/100) * (perf/100) * (qual/100) * 100;
+            const mtbf = uptime / (failures || 1);
+            const mttr = downtime / (failures || 1);
+
+            const entry = {
+                id: Date.now(),
+                assetName,
+                date: new Date().toLocaleDateString(),
+                oee, mtbf, mttr, avail, perf, qual
+            };
+
+            history.unshift(entry);
+            localStorage.setItem('reliabilityHistory', JSON.stringify(history));
+            updateHistoryBadge();
+            showStatus('Log Saved!', 'bg-blue-50 text-blue-600');
+        }
+
+        function clearHistory() {
+            if (confirm("Delete all historical records?")) {
+                history = [];
+                localStorage.setItem('reliabilityHistory', '[]');
+                updateHistoryBadge();
+                renderHistory();
+            }
+        }
+
+        function deleteEntry(id) {
+            history = history.filter(e => e.id !== id);
+            localStorage.setItem('reliabilityHistory', JSON.stringify(history));
+            updateHistoryBadge();
+            renderHistory();
+        }
+
+        function updateHistoryBadge() {
+            document.getElementById('history-count').innerText = history.length;
+        }
+
+        function renderHistory() {
+            const container = document.getElementById('history-tbody');
+            const empty = document.getElementById('history-empty');
+            const table = document.getElementById('history-table-container');
+
+            if (history.length === 0) {
+                empty.classList.remove('hidden');
+                table.classList.add('hidden');
+                return;
+            }
+
+            empty.classList.add('hidden');
+            table.classList.remove('hidden');
+
+            container.innerHTML = history.map(item => `
+                <tr class="bg-white shadow-sm hover:shadow-md transition-all group">
+                    <td class="px-6 py-5 rounded-l-2xl">
+                        <div class="font-bold text-slate-900">${item.assetName}</div>
+                        <div class="text-[10px] text-slate-500 font-bold">${item.date}</div>
+                    </td>
+                    <td class="px-6 py-5">
+                        <div class="text-xl font-black text-indigo-600">${item.oee.toFixed(1)}%</div>
+                    </td>
+                    <td class="px-6 py-5">
+                        <div class="flex flex-col text-[11px] font-bold">
+                            <span class="text-emerald-600">↑ ${item.mtbf.toFixed(1)}h MTBF</span>
+                            <span class="text-orange-500">↓ ${item.mttr.toFixed(1)}h MTTR</span>
+                        </div>
+                    </td>
+                    <td class="px-6 py-5 rounded-r-2xl text-right">
+                        <button onclick="deleteEntry(${item.id})" class="p-2 text-slate-200 hover:text-red-500 transition-colors">
+                            <i data-lucide="trash-2" class="w-5 h-5"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        function exportHistory() {
+            if (history.length === 0) return;
+            const headers = "Asset,Date,OEE,MTBF,MTTR,Availability,Performance,Quality\n";
+            const rows = history.map(h => `${h.assetName},${h.date},${h.oee.toFixed(2)},${h.mtbf.toFixed(2)},${h.mttr.toFixed(2)},${h.avail.toFixed(2)},${h.perf.toFixed(2)},${h.qual.toFixed(2)}`).join("\n");
+            const blob = new Blob([headers + rows], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Reliability_History_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+        }
+
+        // Init
+        window.onload = () => {
+            lucide.createIcons();
+            updateHistoryBadge();
+            updateCalculations();
+        };
+    </script>
+</body>
+</html>
