@@ -1,0 +1,482 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { 
+  Calculator, 
+  Settings, 
+  History, 
+  BarChart3, 
+  Info, 
+  Plus, 
+  Trash2, 
+  TrendingUp, 
+  Clock, 
+  AlertTriangle, 
+  RefreshCcw,
+  CheckCircle2,
+  FileSpreadsheet,
+  Download,
+  Upload,
+  Activity,
+  Target,
+  ShieldCheck,
+  FileText
+} from 'lucide-react';
+
+// --- Components ---
+
+const Card = ({ children, className = "" }) => (
+  <div className={`bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden ${className}`}>
+    {children}
+  </div>
+);
+
+const MetricCard = ({ title, value, unit, icon: Icon, colorClass, description }) => (
+  <Card className="p-5 flex flex-col justify-between hover:shadow-md transition-shadow">
+    <div className="flex justify-between items-start mb-4">
+      <div className={`p-2 rounded-lg ${colorClass} bg-opacity-10 text-opacity-100`}>
+        <Icon size={20} className={colorClass.replace('bg-', 'text-')} />
+      </div>
+      <div className="text-right">
+        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{title}</p>
+        <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+          {value} <span className="text-sm font-normal text-slate-400">{unit}</span>
+        </h3>
+      </div>
+    </div>
+    <p className="text-xs text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700 pt-3 mt-2 italic">
+      {description}
+    </p>
+  </Card>
+);
+
+const App = () => {
+  const [activeTab, setActiveTab] = useState('calculator');
+  const fileInputRef = useRef(null);
+  
+  const [formData, setFormData] = useState({
+    assetName: 'Production Line Alpha',
+    totalOperatingTime: 2000, 
+    totalDowntime: 120,       
+    failuresCount: 8,
+    replacementsCount: 3,
+    totalUnits: 50000,        
+    goodUnits: 48500,         
+    idealCycleTime: 0.035     
+  });
+
+  const [history, setHistory] = useState([]);
+  const [importStatus, setImportStatus] = useState(null);
+
+  // --- Logic ---
+
+  const metrics = useMemo(() => {
+    const { 
+      totalOperatingTime, 
+      totalDowntime, 
+      failuresCount, 
+      replacementsCount,
+      totalUnits,
+      goodUnits,
+      idealCycleTime
+    } = formData;
+    
+    const mtbf = failuresCount > 0 ? (totalOperatingTime / failuresCount) : totalOperatingTime;
+    const mttr = failuresCount > 0 ? (totalDowntime / failuresCount) : 0;
+    const mttf = replacementsCount > 0 ? (totalOperatingTime / replacementsCount) : totalOperatingTime;
+    const mtbr = replacementsCount > 0 ? ((totalOperatingTime + totalDowntime) / replacementsCount) : (totalOperatingTime + totalDowntime);
+
+    const availability = (totalOperatingTime / (totalOperatingTime + totalDowntime || 1)) * 100;
+    const performanceVal = totalOperatingTime > 0 
+      ? ((idealCycleTime * totalUnits) / totalOperatingTime) * 100 
+      : 0;
+    const performance = Math.min(performanceVal, 100); 
+    const quality = totalUnits > 0 ? (goodUnits / totalUnits) * 100 : 0;
+    const oee = (availability / 100) * (performance / 100) * (quality / 100) * 100;
+
+    return { mtbf, mttr, mttf, mtbr, availability, performance, quality, oee };
+  }, [formData]);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: name === 'assetName' ? value : parseFloat(value) || 0
+    }));
+  };
+
+  const saveToHistory = () => {
+    const newEntry = {
+      id: Date.now(),
+      date: new Date().toLocaleDateString(),
+      ...formData,
+      metrics: { ...metrics }
+    };
+    setHistory([newEntry, ...history]);
+  };
+
+  const deleteHistoryItem = (id) => {
+    setHistory(history.filter(item => item.id !== id));
+  };
+
+  // --- CSV Import/Export Logic ---
+
+  const handleImportCSV = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const rows = text.split('\n').filter(row => row.trim() !== '');
+        if (rows.length < 2) throw new Error("File is empty or missing data row.");
+
+        const headers = rows[0].split(',').map(h => h.trim().toLowerCase());
+        const values = rows[1].split(',').map(v => v.trim());
+
+        const dataMap = {};
+        headers.forEach((header, index) => {
+          dataMap[header] = values[index];
+        });
+
+        // Map CSV fields to State (handles varied naming conventions)
+        setFormData({
+          assetName: dataMap.asset || dataMap.assetname || dataMap.name || formData.assetName,
+          totalOperatingTime: parseFloat(dataMap.uptime || dataMap.operatingtime) || formData.totalOperatingTime,
+          totalDowntime: parseFloat(dataMap.downtime || dataMap.repairtime) || formData.totalDowntime,
+          failuresCount: parseInt(dataMap.failures || dataMap.breakdowns) || formData.failuresCount,
+          replacementsCount: parseInt(dataMap.replacements) || formData.replacementsCount,
+          totalUnits: parseInt(dataMap.totalunits || dataMap.output) || formData.totalUnits,
+          goodUnits: parseInt(dataMap.goodunits || dataMap.yield) || formData.goodUnits,
+          idealCycleTime: parseFloat(dataMap.idealcycle || dataMap.cycletime) || formData.idealCycleTime,
+        });
+
+        setImportStatus({ type: 'success', message: 'Data imported successfully!' });
+        setTimeout(() => setImportStatus(null), 3000);
+      } catch (err) {
+        setImportStatus({ type: 'error', message: 'Import failed. Check CSV format.' });
+        setTimeout(() => setImportStatus(null), 3000);
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = null; // Reset input
+  };
+
+  const downloadCSV = (data, filename) => {
+    if (!data || data.length === 0) return;
+    const headers = Object.keys(data[0]).join(',');
+    const rows = data.map(obj => 
+      Object.values(obj).map(val => 
+        typeof val === 'string' ? `"${val}"` : val
+      ).join(',')
+    );
+    const csvContent = [headers, ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${filename}.csv`);
+    link.click();
+  };
+
+  const exportHistory = () => {
+    const exportData = history.map(item => ({
+      Asset: item.assetName,
+      Date: item.date,
+      OEE: item.metrics.oee.toFixed(2),
+      MTBF: item.metrics.mtbf.toFixed(2),
+      MTTR: item.metrics.mttr.toFixed(2),
+      Availability: item.metrics.availability.toFixed(2),
+      Performance: item.metrics.performance.toFixed(2),
+      Quality: item.metrics.quality.toFixed(2)
+    }));
+    downloadCSV(exportData, `Maintenance_Logs_${new Date().toISOString().split('T')[0]}`);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans">
+      {/* Hidden File Input */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        onChange={handleImportCSV} 
+        className="hidden" 
+        accept=".csv"
+      />
+
+      <nav className="sticky top-0 z-50 bg-white/80 dark:bg-slate-800/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16 items-center">
+            <div className="flex items-center gap-2">
+              <div className="bg-blue-600 p-1.5 rounded-lg">
+                <Settings className="text-white" size={24} />
+              </div>
+              <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">
+                ReliabilityPro + OEE
+              </h1>
+            </div>
+            
+            <div className="hidden md:flex space-x-4">
+              <button 
+                onClick={() => setActiveTab('calculator')}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'calculator' ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'}`}
+              >
+                Calculator
+              </button>
+              <button 
+                onClick={() => setActiveTab('history')}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'history' ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'}`}
+              >
+                History
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {activeTab === 'calculator' ? (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            
+            {/* Input Section */}
+            <div className="lg:col-span-4 space-y-6">
+              <Card className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <Calculator size={20} className="text-blue-600" />
+                    <h2 className="text-lg font-semibold">Input Data</h2>
+                  </div>
+                  <button 
+                    onClick={() => fileInputRef.current.click()}
+                    className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-lg transition-all"
+                    title="Import CSV"
+                  >
+                    <Upload size={18} />
+                  </button>
+                </div>
+
+                {importStatus && (
+                  <div className={`mb-4 p-2 rounded text-xs text-center ${importStatus.type === 'success' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                    {importStatus.message}
+                  </div>
+                )}
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Asset Name</label>
+                    <input type="text" name="assetName" value={formData.assetName} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all"/>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Uptime (Hrs)</label>
+                      <input type="number" name="totalOperatingTime" value={formData.totalOperatingTime} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Downtime (Hrs)</label>
+                      <input type="number" name="totalDowntime" value={formData.totalDowntime} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Failures</label>
+                      <input type="number" name="failuresCount" value={formData.failuresCount} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Total Output</label>
+                      <input type="number" name="totalUnits" value={formData.totalUnits} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Good Units</label>
+                      <input type="number" name="goodUnits" value={formData.goodUnits} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Cycle (Hrs/U)</label>
+                      <input type="number" step="0.001" name="idealCycleTime" value={formData.idealCycleTime} onChange={handleInputChange} className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg"/>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 flex flex-col gap-2">
+                    <button onClick={saveToHistory} className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-lg shadow-blue-500/20 active:scale-95 transition-all">
+                      <Plus size={18} /> Save Entry
+                    </button>
+                    <div className="grid grid-cols-2 gap-2">
+                       <button 
+                        onClick={() => fileInputRef.current.click()}
+                        className="flex items-center justify-center gap-2 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-xs font-bold transition-all"
+                       >
+                         <Upload size={14} /> Import CSV
+                       </button>
+                       <button 
+                        onClick={exportHistory}
+                        className="flex items-center justify-center gap-2 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-xs font-bold transition-all"
+                       >
+                         <Download size={14} /> Export CSV
+                       </button>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
+              {/* CSV Template Guide */}
+              <Card className="p-4 bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800">
+                <div className="flex gap-2 mb-2">
+                  <FileText className="text-blue-600" size={16} />
+                  <h4 className="text-xs font-bold text-blue-800 dark:text-blue-300">CSV Import Tip</h4>
+                </div>
+                <p className="text-[10px] text-blue-700/80 dark:text-blue-400/80 mb-2">
+                  Excel Headers: <code className="bg-white/50 px-1 rounded">Asset, Uptime, Downtime, Failures, TotalUnits, GoodUnits, IdealCycle</code>
+                </p>
+              </Card>
+
+              {/* OEE Summary Card */}
+              <Card className="p-6 bg-gradient-to-br from-blue-600 to-indigo-800 text-white border-none shadow-xl">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold flex items-center gap-2">
+                    <Target size={20} />
+                    OEE SCORE
+                  </h3>
+                  <span className="text-3xl font-black">{metrics.oee.toFixed(1)}%</span>
+                </div>
+                <div className="w-full bg-white/20 rounded-full h-3 overflow-hidden">
+                  <div className="bg-white h-full transition-all duration-1000" style={{ width: `${metrics.oee}%` }}></div>
+                </div>
+              </Card>
+            </div>
+
+            {/* Metrics Dashboard */}
+            <div className="lg:col-span-8 space-y-8">
+              {/* OEE Breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card className="p-4 border-l-4 border-l-blue-500">
+                   <div className="flex items-center gap-2 text-blue-600 mb-2">
+                     <Clock size={16}/> <span className="text-xs font-bold uppercase tracking-wider">Availability</span>
+                   </div>
+                   <div className="text-xl font-bold">{metrics.availability.toFixed(1)}%</div>
+                </Card>
+                <Card className="p-4 border-l-4 border-l-amber-500">
+                   <div className="flex items-center gap-2 text-amber-600 mb-2">
+                     <Activity size={16}/> <span className="text-xs font-bold uppercase tracking-wider">Performance</span>
+                   </div>
+                   <div className="text-xl font-bold">{metrics.performance.toFixed(1)}%</div>
+                </Card>
+                <Card className="p-4 border-l-4 border-l-emerald-500">
+                   <div className="flex items-center gap-2 text-emerald-600 mb-2">
+                     <ShieldCheck size={16}/> <span className="text-xs font-bold uppercase tracking-wider">Quality</span>
+                   </div>
+                   <div className="text-xl font-bold">{metrics.quality.toFixed(1)}%</div>
+                </Card>
+              </div>
+
+              {/* Reliability Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <MetricCard 
+                  title="MTBF" value={metrics.mtbf.toFixed(1)} unit="hrs" icon={TrendingUp} colorClass="bg-emerald-500"
+                  description="Mean Time Between Failures."
+                />
+                <MetricCard 
+                  title="MTTR" value={metrics.mttr.toFixed(1)} unit="hrs" icon={Clock} colorClass="bg-orange-500"
+                  description="Mean Time To Repair."
+                />
+              </div>
+
+              {/* Chart */}
+              <Card className="p-6">
+                <h2 className="text-lg font-semibold mb-8">Performance Distribution</h2>
+                <div className="space-y-6">
+                  {[
+                    { label: 'OEE', val: metrics.oee, color: 'bg-indigo-600', max: 100 },
+                    { label: 'MTBF', val: metrics.mtbf, color: 'bg-emerald-500', max: Math.max(metrics.mtbf, 1000) },
+                    { label: 'MTTR', val: metrics.mttr, color: 'bg-orange-500', max: Math.max(metrics.mtbf, 1000) }
+                  ].map((item) => {
+                    const width = (item.val / item.max) * 100;
+                    return (
+                      <div key={item.label}>
+                        <div className="flex justify-between text-xs font-bold mb-1">
+                          <span>{item.label}</span>
+                          <span>{item.val.toFixed(1)}</span>
+                        </div>
+                        <div className="h-2 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div className={`h-full ${item.color} transition-all duration-700`} style={{ width: `${width}%` }}></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            </div>
+          </div>
+        ) : (
+          /* History View */
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-2">
+                <History className="text-blue-600" />
+                <h2 className="text-xl font-bold">Maintenance Logs</h2>
+              </div>
+              <div className="flex gap-3">
+                {history.length > 0 && (
+                  <button onClick={exportHistory} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold flex items-center gap-2 shadow-md">
+                    <Download size={16} /> Export All
+                  </button>
+                )}
+                <button onClick={() => setHistory([])} className="px-4 py-2 text-sm text-red-500 hover:text-red-700 font-medium flex items-center gap-1">
+                  <Trash2 size={16} /> Clear
+                </button>
+              </div>
+            </div>
+
+            {history.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-slate-400 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+                <History size={48} className="mb-4 opacity-20" />
+                <p>Log is empty. Start by saving a calculation.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-separate border-spacing-y-2">
+                  <thead>
+                    <tr className="text-slate-400 text-[10px] font-black uppercase">
+                      <th className="px-4">Asset</th>
+                      <th className="px-4">Date</th>
+                      <th className="px-4">OEE</th>
+                      <th className="px-4">MTBF</th>
+                      <th className="px-4">MTTR</th>
+                      <th className="px-4 text-right">Delete</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((item) => (
+                      <tr key={item.id} className="bg-white dark:bg-slate-800 shadow-sm">
+                        <td className="px-4 py-4 rounded-l-xl font-bold">{item.assetName}</td>
+                        <td className="px-4 py-4 text-slate-500 text-xs">{item.date}</td>
+                        <td className="px-4 py-4 font-bold text-indigo-600">{item.metrics.oee.toFixed(1)}%</td>
+                        <td className="px-4 py-4 text-emerald-600 font-mono text-xs">{item.metrics.mtbf.toFixed(1)}h</td>
+                        <td className="px-4 py-4 text-orange-600 font-mono text-xs">{item.metrics.mttr.toFixed(1)}h</td>
+                        <td className="px-4 py-4 rounded-r-xl text-right">
+                          <button onClick={() => deleteHistoryItem(item.id)} className="p-1 text-slate-300 hover:text-red-500 transition-colors">
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+      
+      <footer className="mt-20 border-t border-slate-200 dark:border-slate-800 py-10">
+        <div className="max-w-7xl mx-auto px-4 text-center text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+          <p>ReliabilityPro 3.0 • Manual & CSV Integration</p>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default App;
