@@ -29,7 +29,7 @@
                     <h1 class="text-2xl font-black text-slate-900 tracking-tight">ReliabilityPro</h1>
                     <div class="flex items-center gap-2">
                         <span class="w-2 h-2 rounded-full bg-emerald-500 pulse-slow"></span>
-                        <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Global Standard v5.8</span>
+                        <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Global Standard v5.9</span>
                     </div>
                 </div>
             </div>
@@ -86,8 +86,8 @@
                                 <input type="number" id="failures" value="4" oninput="calculate()" class="w-full px-5 py-4 bg-slate-50 border-0 rounded-2xl font-bold outline-none">
                             </div>
                             <div class="space-y-1.5">
-                                <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Downtime Cost ($/hr)</label>
-                                <input type="number" id="costPerHour" value="500" oninput="calculate()" class="w-full px-5 py-4 bg-slate-50 border-0 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-500">
+                                <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ideal Cycle (H/U)</label>
+                                <input type="number" id="idealCycle" value="0.05" step="0.001" oninput="calculate()" class="w-full px-5 py-4 bg-slate-50 border-0 rounded-2xl font-bold outline-none">
                             </div>
                         </div>
 
@@ -119,15 +119,12 @@
                     </div>
                 </div>
 
-                <!-- Financial Loss Insight -->
-                <div class="bg-red-500 text-white rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden group">
-                    <div class="absolute -right-8 -bottom-8 w-32 h-32 bg-white/10 rounded-full blur-2xl group-hover:scale-125 transition-transform duration-700"></div>
-                    <p class="text-[10px] font-black uppercase tracking-widest text-red-100 mb-2">Estimated Downtime Loss</p>
-                    <div class="flex items-baseline gap-2">
-                        <span class="text-3xl font-bold opacity-50">$</span>
-                        <span id="financial-loss" class="text-5xl font-black tracking-tighter">0</span>
-                    </div>
-                    <p class="text-[10px] mt-4 font-bold text-red-100/70 italic">Calculated based on total downtime hours.</p>
+                <!-- Info Card -->
+                <div class="bg-blue-50 border border-blue-100 rounded-[2rem] p-8">
+                    <h4 class="text-xs font-black text-blue-600 uppercase tracking-widest mb-4">Export Note</h4>
+                    <p class="text-[10px] text-blue-500 leading-relaxed">
+                        Use the "Export CSV" button to download a comprehensive report containing all input data and calculated metrics for your records.
+                    </p>
                 </div>
             </aside>
 
@@ -266,7 +263,7 @@
                     </div>
                     <div class="flex items-center gap-3 px-6 py-3 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
                         <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                        <span class="text-[10px] font-black text-slate-900 tracking-widest uppercase">ReliabilityPro v5.8 • Stable Enterprise Release</span>
+                        <span class="text-[10px] font-black text-slate-900 tracking-widest uppercase">Developed BY - Golden Micheal • ReliabilityPro v5.9</span>
                     </div>
                 </div>
             </div>
@@ -292,8 +289,7 @@
             const fl = parseFloat(document.getElementById('failures').value) || 0;
             const total = parseFloat(document.getElementById('totalUnits').value) || 0;
             const good = parseFloat(document.getElementById('goodUnits').value) || 0;
-            const costH = parseFloat(document.getElementById('costPerHour').value) || 0;
-            const cycle = 0.05; // Fixed ideal cycle for logic consistency
+            const cycle = parseFloat(document.getElementById('idealCycle').value) || 0.05;
 
             // Validation Guard
             if (good > total) {
@@ -310,7 +306,6 @@
             
             const mtbf = up / (fl || 1);
             const mttr = dw / (fl || 1);
-            const loss = dw * costH;
 
             // UI Rendering
             document.getElementById('oee-val').innerText = oee.toFixed(1);
@@ -321,7 +316,6 @@
             
             document.getElementById('mtbf-val').innerText = mtbf.toFixed(1);
             document.getElementById('mttr-val').innerText = mttr.toFixed(1);
-            document.getElementById('financial-loss').innerText = loss.toLocaleString();
 
             const statusEl = document.getElementById('oee-status');
             if(oee > 85) { statusEl.innerText = "World Class Performance"; statusEl.className = "text-emerald-400"; }
@@ -371,13 +365,26 @@
 
         function saveRecord() {
             const asset = document.getElementById('assetName').value;
+            const up = parseFloat(document.getElementById('uptime').value) || 0;
+            const dw = parseFloat(document.getElementById('downtime').value) || 0;
+            const fl = parseFloat(document.getElementById('failures').value) || 0;
+            const total = parseFloat(document.getElementById('totalUnits').value) || 0;
+            const good = parseFloat(document.getElementById('goodUnits').value) || 0;
+            const cycle = parseFloat(document.getElementById('idealCycle').value) || 0.05;
+
             logs.unshift({ 
                 id: Date.now(), 
                 asset, 
-                date: new Date().toLocaleDateString(), 
-                oee: document.getElementById('oee-val').innerText,
-                mtbf: document.getElementById('mtbf-val').innerText,
-                loss: document.getElementById('financial-loss').innerText
+                date: new Date().toLocaleDateString(),
+                inputs: { up, dw, fl, total, good, cycle },
+                metrics: {
+                    oee: document.getElementById('oee-val').innerText,
+                    avail: document.getElementById('res-avail').innerText,
+                    perf: document.getElementById('res-perf').innerText,
+                    qual: document.getElementById('res-qual').innerText,
+                    mtbf: document.getElementById('mtbf-val').innerText,
+                    mttr: document.getElementById('mttr-val').innerText
+                }
             });
             localStorage.setItem('rp_logs_v2', JSON.stringify(logs));
             alert("Analysis Archived Successfully.");
@@ -396,8 +403,8 @@
                         <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">${l.date}</p>
                     </div>
                     <div class="flex gap-12">
-                        <div class="text-right"><p class="text-[10px] font-black text-slate-400 uppercase">OEE</p><p class="text-2xl font-black text-blue-600">${l.oee}%</p></div>
-                        <div class="text-right"><p class="text-[10px] font-black text-slate-400 uppercase">Total Loss</p><p class="text-2xl font-black text-red-500">$${l.loss}</p></div>
+                        <div class="text-right"><p class="text-[10px] font-black text-slate-400 uppercase">OEE</p><p class="text-2xl font-black text-blue-600">${l.metrics.oee}%</p></div>
+                        <div class="text-right"><p class="text-[10px] font-black text-slate-400 uppercase">MTBF</p><p class="text-2xl font-black text-emerald-600">${l.metrics.mtbf}h</p></div>
                     </div>
                 </div>
             `).join('');
@@ -423,8 +430,18 @@
 
         function exportCSV() {
             if(logs.length === 0) return;
-            const csv = "Asset,Date,OEE,MTBF,Loss\n" + logs.map(l => `${l.asset},${l.date},${l.oee},${l.mtbf},${l.loss}`).join("\n");
-            const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'})); a.download = 'ReliabilityPro_Report.csv'; a.click();
+            // Comprehensive CSV Header
+            const headers = "Asset,Date,Uptime(h),Downtime(h),Failures,Total_Produced,Good_Units,Ideal_Cycle,Availability(%),Performance(%),Quality(%),OEE(%),MTBF(h),MTTR(h)\n";
+            const rows = logs.map(l => {
+                const i = l.inputs;
+                const m = l.metrics;
+                return `${l.asset},${l.date},${i.up},${i.dw},${i.fl},${i.total},${i.good},${i.cycle},${m.avail.replace('%','')},${m.perf.replace('%','')},${m.qual.replace('%','')},${m.oee},${m.mtbf},${m.mttr}`;
+            }).join("\n");
+            
+            const a = document.createElement('a'); 
+            a.href = URL.createObjectURL(new Blob([headers + rows], {type: 'text/csv'})); 
+            a.download = 'ReliabilityPro_Full_Report.csv'; 
+            a.click();
         }
 
         function downloadCSVTemplate() {
